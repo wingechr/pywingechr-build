@@ -20,16 +20,16 @@ import shutil
 import subprocess as sp
 import tempfile
 import unittest
-from functools import partial
 from typing import Callable
 
 
 class BuildEnvironment:
-    __slots__ = ["__nodes", "__targets", "__now"]
+    __slots__ = ["__nodes", "__targets", "__now", "__folders"]
 
     def __init__(self):
         self.__nodes = set()
         self.__targets = set()
+        self.__folders = set()
         self.__now = self._get_cur_timestamp()
         logging.debug("NOW: %s", self.__now)
 
@@ -38,7 +38,7 @@ class BuildEnvironment:
         different from file system time, which we want to use
         """
         with tempfile.NamedTemporaryFile(delete=True) as file:
-            return self._get_timestamp(file.name, allow_future=True)
+            return self._get_timestamp(file.name)
 
     def build(self, builder, targets, sources=None, dependencies=None, kwargs=None):
         """build the target with fun(target, **sources)
@@ -58,47 +58,51 @@ class BuildEnvironment:
         dependencies = dependencies or []
         kwargs = kwargs or {}
 
-        dependencies = [self._add_node(d, allow_dir=True) for d in dependencies]
-        sources = dict((k, self._add_node(v)) for k, v in sources.items())
-        # add targets last so we can check for circular dependencies
-        targets = dict(
-            (k, self._add_node(v, is_target=True)) for k, v in targets.items()
-        )
-
         # make sure no overlapping names exist
         fun_kwargs = targets | sources | kwargs
         assert len(fun_kwargs) == len(targets) + len(sources) + len(kwargs)
 
+        # check dependencies/sources and get latest timestamp
+
+        dependency_files = set()
+
+        for d in dependencies:
+            dependency_files = dependency_files | set(self._add_nodes(d))
+        for s in sources.values():
+            dependency_files = dependency_files | set(self._add_nodes(s))
+
+        if dependency_files:
+            dependency_files_latest_ts = self._get_latest_ts(dependency_files)
+        else:
+            dependency_files_latest_ts = None
+
+        # add targets last so we can check for circular dependencies
+        target_files = set()
+        for t in targets.values():
+            target_files = target_files | set(self._add_nodes(t, is_target=True))
+
         # checks implicitly if sources exists
-        if not all(
-            self._check_target_ok(t, *dependencies, *sources.values())
-            for t in targets.values()
-        ):
-            self._prepare_build(targets)
+        if not self._check_targets_ok(target_files, dependency_files_latest_ts):
             fun = self._as_fun(builder)
             logging.info("Building %s", list(targets.values()))
 
             try:
                 fun(**fun_kwargs)
+                if not self._check_targets_ok(target_files, dependency_files_latest_ts):
+                    raise Exception("Build failed")
+
+                # harmonize timestamp
+                for target in target_files:
+                    os.utime(target, times=(self.__now, self.__now))
+
             except Exception as exc:
                 logging.error(exc)
-                # delete failed target (if exist)
-                for target in targets.values():
-                    if os.path.isfile(target):
-                        os.remove(target)
-
-            for target in targets.values():
-                if not os.path.isfile(target):
-                    raise Exception("Build failed for %s" % target)
-
-            # set timestamp
-            for target in targets.values():
-                os.utime(target, times=(self.__now, self.__now))
+                raise
 
         else:
-            logging.debug("Skipping %s", list(targets.values()))
+            logging.debug("Skipping %s", list(target_files))
 
-        return targets
+        return target_files
 
     def _as_fun(self, builder):
         if isinstance(builder, Callable):
@@ -106,12 +110,11 @@ class BuildEnvironment:
         else:
             return create_cmd(builder)
 
-    def _check_target_ok(self, target, *dependencies):
-        if dependencies:
-            sources_depends_latest_ts = self._get_latest_ts(dependencies)
-        else:
-            sources_depends_latest_ts = None
-
+    def _check_target_ok(self, target, sources_depends_latest_ts):
+        """target is ok if
+        * it exists
+        * newer than all sources (if they exist)
+        """
         if os.path.isfile(target):
             target_latest_ts = self._get_timestamp(target)
         else:
@@ -125,45 +128,43 @@ class BuildEnvironment:
             )
         )
 
-    def _prepare_build(self, targets):
-        for target in targets.values():
-            # if os.path.isfile(target):
-            #    os.remove(target)
-            os.makedirs(os.path.dirname(target), exist_ok=True)
+    def _check_targets_ok(self, targets, sources_depends_latest_ts):
+        return all(self._check_target_ok(t, sources_depends_latest_ts) for t in targets)
 
-    def _add_node(self, path, is_target=False, allow_dir=False):
-        if isinstance(path, list):
-            for p in path:
-                self._add_node(p, is_target=is_target, allow_dir=allow_dir)
-            return
+    def _add_nodes(self, paths, is_target=False):
+        if not isinstance(paths, list):
+            paths = [paths]
 
-        if allow_dir and os.path.isdir(path):
-            for rt, _ds, fs in os.walk(path):
-                for f in fs:
-                    self._add_node(f"{rt}/{f}", is_target=is_target, allow_dir=False)
-            return
+        paths = [self._get_path(p) for p in paths]
 
-        path = self._get_path(path)
-        if is_target:
-            if path in self.__nodes:
-                raise ValueError(
-                    "target path cannot be source for this or previous builds: %s"
-                    % path
-                )
-            self.__targets.add(path)
+        for path in paths:
+
+            if is_target:
+                logging.info(f"add target: {path}")
+                if path in self.__nodes:
+                    raise ValueError(
+                        "target path cannot be source for this or previous builds: %s"
+                        % path
+                    )
+                # assert folder exists
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+
+                self.__targets.add(path)
+            else:
+                logging.info(f"add node: {path}")
+
         self.__nodes.add(path)
-        return path
+        return paths
 
     @staticmethod
     def _get_path(path):
         path = os.path.realpath(path)
+        # make sure path is not a folder
+        assert not os.path.isdir(path)
         return path
 
-    def _get_timestamp(self, path, allow_future=False):
+    def _get_timestamp(self, path):
         ts = os.path.getmtime(path)
-        if not allow_future and ts > self.__now:
-            raise Exception("timestamp %s > now %s for %s" % (ts, self.__now, path))
-        logging.debug("Timestap %s %s", ts, path)
         return ts
 
     def _get_latest_ts(self, paths):
@@ -223,13 +224,11 @@ class TestBuild(unittest.TestCase):
 
             # try to update source fails now (cycle)
             self.assertRaises(
-                ValueError,
-                partial(
-                    env.build,
-                    builder=shutil.copy,
-                    targets={"dst": f"{pwd}/s"},
-                    sources={"src": f"{pwd}/t"},
-                ),
+                Exception,
+                env.build,
+                builder=shutil.copy,
+                targets={"dst": f"{pwd}/s"},
+                sources={"src": f"{pwd}/t"},
             )
 
 
