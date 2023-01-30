@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="wingechr-build",
-    version="0.0.7",
+    version="0.0.8",
     packages=["wingechr.build"],
     author="Christian Winger",
     author_email="c.winger@oeko.de",
