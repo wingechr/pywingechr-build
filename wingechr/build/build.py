@@ -131,12 +131,18 @@ class BuildEnvironment:
             #    os.remove(target)
             os.makedirs(os.path.dirname(target), exist_ok=True)
 
-    def _add_node(self, path, is_target=False, allow_dir=False):        
+    def _add_node(self, path, is_target=False, allow_dir=False):
+        if isinstance(path, list):
+            for p in path:
+                self._add_node(p, is_target=is_target, allow_dir=allow_dir)
+            return
+
         if allow_dir and os.path.isdir(path):
             for rt, _ds, fs in os.walk(path):
                 for f in fs:
-                    self._add_node(f'{rt}/{f}', is_target=is_target, allow_dir=False)
+                    self._add_node(f"{rt}/{f}", is_target=is_target, allow_dir=False)
             return
+
         path = self._get_path(path)
         if is_target:
             if path in self.__nodes:
