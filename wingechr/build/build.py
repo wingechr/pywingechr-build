@@ -58,7 +58,7 @@ class BuildEnvironment:
         dependencies = dependencies or []
         kwargs = kwargs or {}
 
-        dependencies = [self._add_node(d) for d in dependencies]
+        dependencies = [self._add_node(d, allow_dir=True) for d in dependencies]
         sources = dict((k, self._add_node(v)) for k, v in sources.items())
         # add targets last so we can check for circular dependencies
         targets = dict(
@@ -131,7 +131,12 @@ class BuildEnvironment:
             #    os.remove(target)
             os.makedirs(os.path.dirname(target), exist_ok=True)
 
-    def _add_node(self, path, is_target=False):
+    def _add_node(self, path, is_target=False, allow_dir=False):        
+        if allow_dir and os.path.isdir(path):
+            for rt, _ds, fs in os.walk(path):
+                for f in fs:
+                    self._add_node(f'{rt}/{f}', is_target=is_target, allow_dir=False)
+            return
         path = self._get_path(path)
         if is_target:
             if path in self.__nodes:
