@@ -175,12 +175,12 @@ def create_cmd(cmd_template):
         # prepare command
         if isinstance(cmd_template, str):
             cmd = cmd_template % kwargs
+            logging.info(cmd)
         elif isinstance(cmd_template, list):
             cmd = [p % kwargs for p in cmd_template]
+            logging.info(" ".join(cmd))
         else:
             raise NotImplementedError(type(cmd_template))
-
-        logging.info(" ".join(cmd))
 
         p = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
         _, stderr = p.communicate()
