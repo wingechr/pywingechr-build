@@ -104,7 +104,7 @@ class BuildEnvironment:
             for f in target_files:
                 logging.info("Skipping %s", f)
 
-        return target_files
+        return list(target_files)
 
     def _as_fun(self, builder):
         if isinstance(builder, Callable):
@@ -150,7 +150,7 @@ class BuildEnvironment:
                 # assert folder exists
                 os.makedirs(os.path.dirname(path), exist_ok=True)
 
-                self.__targets.add(path)            
+                self.__targets.add(path)
 
         self.__nodes.add(path)
         return paths
@@ -173,16 +173,14 @@ class BuildEnvironment:
 def create_cmd(cmd_template):
     def fun(**kwargs):
         # prepare command
-        logging.info(kwargs)
         if isinstance(cmd_template, str):
-            logging.info(cmd_template)
             cmd = cmd_template % kwargs
-            logging.debug(cmd)
         elif isinstance(cmd_template, list):
             cmd = [p % kwargs for p in cmd_template]
-            logging.debug(" ".join(cmd))
         else:
             raise NotImplementedError(type(cmd_template))
+
+        logging.info(" ".join(cmd))
 
         p = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
         _, stderr = p.communicate()
