@@ -84,7 +84,8 @@ class BuildEnvironment:
         # checks implicitly if sources exists
         if not self._check_targets_ok(target_files, dependency_files_latest_ts):
             fun = self._as_fun(builder)
-            logging.info("Building %s", list(targets.values()))
+            for f in target_files:
+                logging.info("Building %s", f)
 
             try:
                 fun(**fun_kwargs)
@@ -100,7 +101,8 @@ class BuildEnvironment:
                 raise
 
         else:
-            logging.debug("Skipping %s", list(target_files))
+            for f in target_files:
+                logging.info("Skipping %s", f)
 
         return target_files
 
@@ -140,7 +142,6 @@ class BuildEnvironment:
         for path in paths:
 
             if is_target:
-                logging.info(f"add target: {path}")
                 if path in self.__nodes:
                     raise ValueError(
                         "target path cannot be source for this or previous builds: %s"
@@ -149,9 +150,7 @@ class BuildEnvironment:
                 # assert folder exists
                 os.makedirs(os.path.dirname(path), exist_ok=True)
 
-                self.__targets.add(path)
-            else:
-                logging.info(f"add node: {path}")
+                self.__targets.add(path)            
 
         self.__nodes.add(path)
         return paths
